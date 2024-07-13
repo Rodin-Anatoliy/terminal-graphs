@@ -1,4 +1,4 @@
-//package terminal_graphs
+// package terminal_graphs
 package main
 
 import (
@@ -128,9 +128,13 @@ func displayGraph(data Data, writer *uilive.Writer) {
 	fmt.Fprintln(writer.Newline(), "Текущее время:", t.Format("15:04:05"))
 }
 
-func displayWorker(dataCh chan Data, displayModeCh chan int, writer *uilive.Writer) {
+func displayWorker(dataCh chan Data, displayModeCh chan int) {
+	writer := uilive.New()
+	writer.Start()
+	defer writer.Stop()
+
 	currentMode := -1
-	for range time.Tick(time.Millisecond * 100) {
+	for range time.Tick(1 * time.Second) {
 		select {
 		case mode := <-displayModeCh:
 			if mode != currentMode {
@@ -162,22 +166,21 @@ func dataWorker(dataCh chan Data, pairsKeyCh chan string) {
 	api := &Api{url: "https://api.exmo.com/v1.1"}
 	var lastPairsKey string
 
-	for range time.Tick(time.Second) {
+	for range time.Tick(1 * time.Second) {
 		select {
 		case pairsKey := <-pairsKeyCh:
 			lastPairsKey = pairsKey
 		default:
 		}
 
-		if len(lastPairsKey) == 0 {
-			continue
+		if len(lastPairsKey) > 0 {
+			prices, key, err := api.getPrices(lastPairsKey)
+			if err != nil {
+				log.Println("Error fetching data:", err)
+			}
+	
+			dataCh <- Data{prices: prices, pairsKey: key}
 		}
-		prices, key, err := api.getPrices(lastPairsKey)
-		if err != nil {
-			log.Println("Error fetching data:", err)
-		}
-
-		dataCh <- Data{prices: prices, pairsKey: key}
 	}
 }
 
@@ -191,16 +194,15 @@ func main() {
 		_ = keyboard.Close()
 	}()
 
-	writer := uilive.New()
-	writer.Start()
-	defer writer.Stop()
-
 	dataCh := make(chan Data, 1)
 	pairsKeyCh := make(chan string, 1)
 	displayModeCh := make(chan int, 1)
 
 	go dataWorker(dataCh, pairsKeyCh)
-	go displayWorker(dataCh, displayModeCh, writer)
+	go displayWorker(dataCh, displayModeCh)
+	go inputHandler(keysEvents, pairsKeyCh, displayModeCh)
+
 	displayModeCh <- 0
-	inputHandler(keysEvents, pairsKeyCh, displayModeCh)
+
+	select {}
 }
